@@ -1,12 +1,24 @@
 from fastapi import FastAPI, HTTPException, status, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 from database import engine, Base, SessionLocal
 import models
 from models import User
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
+from sqlalchemy.exc import IntegrityError, OperationalError
+import logging
+logging.basicConfig(level=logging.INFO, force=True)
+logger=logging.getLogger(__name__)
+file_handler= logging.FileHandler("app.log")
+formatter = logging.Formatter(
+    "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
 
+file_handler.setFormatter(formatter)
 
+logger.addHandler(file_handler)
+
+logger.info("Server started")
 
 app = FastAPI()
 
@@ -33,8 +45,8 @@ def user_login(data:LoginRequest):
 
 
 class SignupRequest(BaseModel):
-    email:str
-    password:str
+    email:EmailStr
+    password:str = Field(min_length=8)
 # endpoint for creating acct
 
 
@@ -56,28 +68,62 @@ def email_exists(email: str, db:Session):
     return False
 
 
+#hash password
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto"
+)
+
+def hash_password(password: str):
+    return pwd_context.hash(password)
+
 
 @app.post("/register", status_code=status.HTTP_201_CREATED)
 def create_acct(data:SignupRequest,  db:Session=Depends(get_db)):
     if email_exists(data.email,db):
+        logger.warning(f"Duplicate registration attempt: {data.email}")
         raise HTTPException(status_code=409, detail="Email already registered")
     
-    #hash password
-    pwd_context = CryptContext(
-        schemes=["bcrypt"],
-        deprecated="auto"
-    )
-
-    def hash_password(password: str):
-        return pwd_context.hash(password)
+    
 
     hashed_pw=hash_password(data.password)
 
     new_user = User(username = data.email, password = hashed_pw)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        logger.info(f"New account created: {data.email}")
+    except IntegrityError:
+        db.rollback()
+        logger.warning(f"Duplicate registration attempt: {data.email}")
+        raise HTTPException(
+            status_code=409,
+            detail="Email already registered no way"
+        )
+    except OperationalError:
+        db.rollback()
+        logger.exception("Database error during account creation")
+        raise HTTPException(
+            status_code=500,
+            detail="Database operational error"
+        )
+
+
+    except Exception as e:
+        db.rollback()
+        logger.exception(f"Error occured during account creation: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail = "Internal server error"
+        )
+        
 
     return {"message":"Successfully created an account"}
     
-    
+
+
+@app.get("/test")
+def home():
+    x=1/0
+    return x
