@@ -7,9 +7,19 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from sqlalchemy.exc import IntegrityError, OperationalError
 import logging
+from logging.handlers import RotatingFileHandler
+import os
+os.makedirs("logs", exist_ok=True)
 logging.basicConfig(level=logging.INFO, force=True)
 logger=logging.getLogger(__name__)
-file_handler= logging.FileHandler("app.log")
+
+
+file_handler = RotatingFileHandler(
+    "logs/app.log",
+    maxBytes=1024 * 1024,
+    backupCount=3
+)
+
 formatter = logging.Formatter(
     "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 )
@@ -122,8 +132,3 @@ def create_acct(data:SignupRequest,  db:Session=Depends(get_db)):
     return {"message":"Successfully created an account"}
     
 
-
-@app.get("/test")
-def home():
-    x=1/0
-    return x
