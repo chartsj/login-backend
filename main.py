@@ -9,6 +9,14 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import jwt
+from datetime import datetime,timedelta, timezone
+import secrets
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 os.makedirs("logs", exist_ok=True)
 logging.basicConfig(level=logging.INFO, force=True)
 logger=logging.getLogger(__name__)
@@ -33,6 +41,25 @@ logger.info("Server started")
 app = FastAPI()
 
 Base.metadata.create_all(bind=engine)
+#hash password
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto"
+)
+
+def hash_password(password: str):
+    return pwd_context.hash(password)
+
+def get_db():
+    #SessionLocal
+    db=SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def verify_password(plain_pw,hashed_pw):
+    return pwd_context.verify(plain_pw,hashed_pw)
 
 @app.get("/")
 def home():
@@ -46,13 +73,36 @@ class LoginRequest(BaseModel):
     email:str
     password:str
 
-#user login endpoint
-@app.post("/login")
-def user_login(data:LoginRequest):
-    if data.email=='test@gmail.com' and data.password=='123':
-        return {"message":"Login Successful"}
-    raise HTTPException(status_code=401, detail="Invalid email or password")
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
+def create_access_token(data):
+    payload = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(hours=1)
+    payload.update({
+        "exp":expire
+    })
+    
+    token = jwt.encode(payload,SECRET_KEY,algorithm=ALGORITHM)
+    
+    return token
 
+
+@app.post("/login")
+def user_login(data:LoginRequest, db: Session = Depends(get_db)):
+    
+    #query the sqlite if this password and email address match any existing user
+    user = db.query(User).filter(User.username==data.email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+
+    password_valid=verify_password(data.password, user.password)
+    if not password_valid:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+
+    access_token = create_access_token({"sub":str(user.id)})
+    return {"access_token":access_token, "token_type":"bearer"}
 
 class SignupRequest(BaseModel):
     email:EmailStr
@@ -60,13 +110,7 @@ class SignupRequest(BaseModel):
 # endpoint for creating acct
 
 
-def get_db():
-    #SessionLocal
-    db=SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+
     
 
 def email_exists(email: str, db:Session):
@@ -78,14 +122,7 @@ def email_exists(email: str, db:Session):
     return False
 
 
-#hash password
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto"
-)
 
-def hash_password(password: str):
-    return pwd_context.hash(password)
 
 
 @app.post("/register", status_code=status.HTTP_201_CREATED)
