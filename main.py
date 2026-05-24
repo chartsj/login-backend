@@ -73,15 +73,15 @@ class LoginRequest(BaseModel):
     email:str
     password:str
 
-
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = "HS256"
 def create_access_token(data):
     payload = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(hours=1)
     payload.update({
         "exp":expire
     })
-    SECRET_KEY = os.getenv("SECRET_KEY")
-    ALGORITHM = "HS256"
+    
     token = jwt.encode(payload,SECRET_KEY,algorithm=ALGORITHM)
     
     return token
